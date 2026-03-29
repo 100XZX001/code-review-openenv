@@ -1,0 +1,38 @@
+name: code_review_env
+version: 1.0.0
+description: Code review environment with three tasks
+author: yuvraj gupta
+license: MIT
+tasks:
+  - id: easy
+    description: Add a helpful comment about missing null check
+  - id: medium
+    description: Suggest using enumerate for efficiency
+  - id: hard
+    description: Point out division by zero risk with empty list
+observation_space:
+  type: object
+  properties:
+    pr_code:
+      type: string
+    comments:
+      type: array
+      items:
+        type: string
+    agent_comment:
+      type: string
+    step:
+      type: integer
+    done:
+      type: boolean
+action_space:
+  type: object
+  properties:
+    action_type:
+      type: string
+      enum:
+        - write_comment
+        - skip
+        - done
+    comment_text:
+      type: string
