@@ -1,6 +1,6 @@
 name: code_review_env
 version: 1.0.0
-description: Code review environment with three tasks
+description: Code review environment with 5 tasks, multi-turn interaction, and code fix proposal
 author: yuvraj gupta
 license: MIT
 tasks:
@@ -10,16 +10,24 @@ tasks:
     description: Suggest using enumerate for efficiency
   - id: hard
     description: Point out division by zero risk with empty list
+  - id: harder
+    description: Identify race condition in multithreaded counter
+  - id: hardest
+    description: Detect potential deadlock in lock ordering
 observation_space:
   type: object
   properties:
-    pr_code:
+    pr_title:
+      type: string
+    pr_description:
+      type: string
+    code_snippet:
       type: string
     comments:
       type: array
       items:
         type: string
-    agent_comment:
+    test_results:
       type: string
     step:
       type: integer
@@ -34,5 +42,11 @@ action_space:
         - write_comment
         - skip
         - done
+        - ask_question
+        - propose_fix
     comment_text:
+      type: string
+    question:
+      type: string
+    fix_code:
       type: string
