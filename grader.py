@@ -1,57 +1,77 @@
-def grade_comment(comment: str, expected_keywords: list, task: str) -> float:
+import numpy as np
+from sentence_transformers import SentenceTransformer, util
+
+# Load model once globally
+_model = None
+
+def _get_model():
+    global _model
+    if _model is None:
+        _model = SentenceTransformer('all-MiniLM-L6-v2')
+    return _model
+
+def grade_comment(comment: str, expected_keywords: list, expert_comment: str) -> float:
     """
-    Returns a score in [0,1] based on keyword coverage and task-specific heuristics.
+    Returns a score in [0,1] based on:
+    - semantic similarity with expert comment (70%)
+    - keyword coverage (30%)
+    - length bonus/penalty
     """
+    if not comment:
+        return 0.0
+
+    # 1. Semantic similarity
+    model = _get_model()
+    emb_comment = model.encode(comment, convert_to_tensor=True)
+    emb_expert = model.encode(expert_comment, convert_to_tensor=True)
+    sim = util.pytorch_cos_sim(emb_comment, emb_expert).item()  # in [0,1]
+
+    # 2. Keyword coverage
     comment_lower = comment.lower()
     matched = sum(1 for kw in expected_keywords if kw in comment_lower)
     kw_score = min(1.0, matched / max(1, len(expected_keywords) // 2))
 
-    # Bonus for length (≥ 15 words)
+    # 3. Combine (70% semantic, 30% keywords)
+    combined = 0.7 * sim + 0.3 * kw_score
+
+    # 4. Length bonus/penalty
     words = comment.split()
-    length_bonus = 0.1 if len(words) >= 15 else 0.0
-
-    # Penalty for very short comments
-    if len(words) < 5:
-        penalty = 0.2
+    if len(words) >= 15:
+        length_bonus = 0.1
+    elif len(words) < 5:
+        length_bonus = -0.2
     else:
-        penalty = 0.0
+        length_bonus = 0.0
 
-    # For hard tasks, also penalise if the comment is too vague
-    if task in ["harder", "hardest"] and "lock" not in comment_lower and "thread" not in comment_lower:
-        penalty += 0.1
-
-    final = kw_score + length_bonus - penalty
+    # 5. Final score, clamped
+    final = combined + length_bonus
     return max(0.0, min(1.0, final))
 
+
 def grade_question(question: str) -> float:
-    """
-    Simple heuristic: longer, more specific questions get higher score.
-    """
+    """Simple heuristic for question quality."""
     words = question.split()
     if len(words) < 3:
         return 0.0
     # Check for question words
     if any(q in question.lower() for q in ["what", "how", "why", "where", "when", "does", "is"]):
-        return min(1.0, len(words) / 20)  # up to 1.0
+        return min(1.0, len(words) / 20)
     return 0.2
 
+
 def grade_fix(proposed_fix: str, expected_fix_keywords: list, hidden_test: callable) -> float:
-    """
-    Runs a simple test (if provided) and also checks keywords.
-    For demonstration, we'll use a keyword‑based check, but in a real
-    environment you'd execute tests.
-    """
-    # Keyword check
+    """Evaluates a code fix. Hidden_test can be a function that runs unit tests."""
+    # Keyword check (simplified)
     matched = sum(1 for kw in expected_fix_keywords if kw in proposed_fix.lower())
     kw_score = min(1.0, matched / max(1, len(expected_fix_keywords) // 2))
 
-    # If we have a real test function, run it
+    # If we have a test function, run it
     test_score = 0.0
     if hidden_test is not None:
         try:
-            test_score = hidden_test(proposed_fix)  # should return 0.0–1.0
+            test_score = hidden_test(proposed_fix)
         except Exception:
             test_score = 0.0
 
-    # Weighted average: 60% tests, 40% keywords
+    # Weighted: 60% test, 40% keywords
     return 0.6 * test_score + 0.4 * kw_score
