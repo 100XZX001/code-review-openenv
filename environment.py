@@ -74,7 +74,7 @@ class CodeReviewEnv:
         if action.action_type == "write_comment":
             self.agent_comment = action.comment_text or ""
             reward = 0.2  # dense bonus for writing
-            quality_score = grade_comment(self.agent_comment, self.expected_keywords, self.task)
+            quality_score = grade_comment(self.agent_comment, self.expected_keywords, self.expert_comment)
             reward += quality_score
             self.done = True
 
