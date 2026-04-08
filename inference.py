@@ -60,6 +60,7 @@ def main():
 
     env = CodeReviewEnv()
     tasks = ["easy", "medium", "hard", "harder", "hardest"]
+    EPS = 0.001
 
     for task in tasks:
         env.set_task(task)
@@ -98,6 +99,12 @@ def main():
             sys.stdout.flush()
 
             history.append(f"Step {step}: {action.action_type}")
+
+        # Clamp the final reward to be strictly between 0 and 1
+        if final_reward <= 0.0:
+            final_reward = EPS
+        elif final_reward >= 1.0:
+            final_reward = 1.0 - EPS
 
         sys.stdout.write(f"[END] task={task} score={final_reward:.3f} steps={step}\n")
         sys.stdout.flush()
