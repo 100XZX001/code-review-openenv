@@ -1,6 +1,8 @@
 import os
+import sys
 import json
 import textwrap
+import asyncio
 from typing import List
 
 from openai import OpenAI
@@ -14,6 +16,9 @@ MAX_STEPS = 5
 TEMPERATURE = 0.2
 MAX_TOKENS = 200
 FALLBACK_ACTION = "skip"
+TASK_NAME = "code_review"          # or "easy", "medium", etc. – but we'll vary per task
+ENV_NAME = "code_review_env"
+SUCCESS_THRESHOLD = 0.5            # if final score >= 0.5, consider success
 
 SYSTEM_PROMPT = textwrap.dedent(
     """
@@ -28,7 +33,6 @@ SYSTEM_PROMPT = textwrap.dedent(
     Do not add any other text.
     """
 ).strip()
-
 
 def build_user_prompt(step: int, obs: Observation, history: List[str]) -> str:
     newline = "\n"
@@ -54,7 +58,6 @@ def build_user_prompt(step: int, obs: Observation, history: List[str]) -> str:
         """
     ).strip()
     return prompt
-
 
 def parse_model_action(response_text: str) -> Action:
     if not response_text:
@@ -85,17 +88,27 @@ def parse_model_action(response_text: str) -> Action:
         return Action(action_type="propose_fix", fix_code=fix)
     return Action(action_type="write_comment", comment_text=raw)
 
+def log_start(task: str, env: str, model: str):
+    print(f"[START] task={task} env={env} model={model}", flush=True)
 
-def main() -> None:
+def log_step(step: int, action: str, reward: float, done: bool, error: str = None):
+    error_str = f" error={error}" if error else ""
+    print(f"[STEP] step={step} action={action} reward={reward:.3f} done={done}{error_str}", flush=True)
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]):
+    # rewards as JSON array to match sample (though sample shows `rewards=rewards` which might be a list)
+    rewards_str = json.dumps(rewards, separators=(',', ':'))
+    print(f"[END] success={success} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+
+async def main() -> None:
     if not API_BASE_URL or not API_KEY or not MODEL_NAME:
-        # This error message is printed to stderr? It must not appear on stdout.
-        # Use sys.stderr to avoid polluting structured output.
-        import sys
         print("Error: API_BASE_URL, HF_TOKEN/API_KEY, and MODEL_NAME must be set.", file=sys.stderr)
         return
 
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-    env = CodeReviewEnv()
+    env = CodeReviewEnv()   # synchronous environment – we'll wrap calls in async? The sample uses async, but we can run sync and just not await.
+    # Since our env is sync, we'll call methods directly. The logging is the key part.
+
     tasks = ["easy", "medium", "hard", "harder", "hardest"]
 
     for task in tasks:
@@ -104,10 +117,10 @@ def main() -> None:
         history: List[str] = []
         done = False
         step = 0
-        final_reward = 0.0
+        rewards = []
+        final_score = 0.0
 
-        # START marker
-        print(f"[START] task={task}", flush=True)
+        log_start(task=task, env=ENV_NAME, model=MODEL_NAME)
 
         while not done and step < MAX_STEPS:
             step += 1
@@ -125,23 +138,28 @@ def main() -> None:
                 )
                 response_text = completion.choices[0].message.content or ""
             except Exception as exc:
-                # Print error to stderr only
-                import sys
                 print(f"Request failed: {exc}. Using fallback.", file=sys.stderr)
                 response_text = FALLBACK_ACTION
 
             action = parse_model_action(response_text)
             obs, reward, done, info = env.step(action)
-            final_reward = reward.value
+            reward_val = reward.value
+            rewards.append(reward_val)
 
-            # STEP marker with required key=value format
-            print(f"[STEP] step={step} reward={final_reward:.3f}", flush=True)
+            log_step(step=step, action=action.action_type, reward=reward_val, done=done)
 
             history.append(f"Step {step}: {action.action_type}")
 
-        # END marker
-        print(f"[END] task={task} score={final_reward:.3f} steps={step}", flush=True)
+        # Compute overall score (e.g., average reward or final reward? Sample uses sum(rewards)/MAX_TOTAL_REWARD.
+        # We'll use average reward per step as score, clamped to [0,1].
+        if rewards:
+            avg_reward = sum(rewards) / len(rewards)
+            score = max(0.0, min(1.0, avg_reward))
+        else:
+            score = 0.0
+        success = score >= SUCCESS_THRESHOLD
 
+        log_end(success=success, steps=step, score=score, rewards=rewards)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
