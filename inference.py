@@ -1,17 +1,20 @@
-import os
 import sys
+
+# Redirect all print calls from imported modules to stderr
+_original_print = print
+def print(*args, **kwargs):
+    kwargs.setdefault('file', sys.stderr)
+    _original_print(*args, **kwargs)
+
+import os
 import textwrap
 
-# ----------------------------------------------------------------------
-#  Always define fallback values – do NOT exit early
-# ----------------------------------------------------------------------
 API_BASE_URL = os.getenv("API_BASE_URL", "https://dummy.api")
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY", "dummy-key")
 MODEL_NAME = os.getenv("MODEL_NAME", "dummy-model")
 MAX_STEPS = 5
 FALLBACK_ACTION = "skip"
 
-# We'll import the environment only after setting dummy env vars
 from environment import CodeReviewEnv
 from models import Action
 
@@ -49,8 +52,6 @@ def parse_model_action(text):
     return Action(action_type="write_comment", comment_text=text)
 
 def main():
-    # Even if API credentials are missing, we still run the loop with fallback actions.
-    # We'll try to create an OpenAI client only if the base URL seems valid.
     try:
         from openai import OpenAI
         client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if API_BASE_URL != "https://dummy.api" else None
@@ -68,7 +69,6 @@ def main():
         step = 0
         final_reward = 0.0
 
-        # [START] marker
         sys.stdout.write(f"[START] task={task}\n")
         sys.stdout.flush()
 
@@ -77,7 +77,6 @@ def main():
             prompt = build_user_prompt(step, obs, history)
             messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}]
 
-            # Try to get a model response, but fallback immediately if client is None or fails
             response_text = FALLBACK_ACTION
             if client is not None:
                 try:
@@ -89,20 +88,17 @@ def main():
                     )
                     response_text = resp.choices[0].message.content or FALLBACK_ACTION
                 except Exception:
-                    # Any API error → fallback
                     pass
 
             action = parse_model_action(response_text)
             obs, reward, done, _ = env.step(action)
             final_reward = reward.value
 
-            # [STEP] marker
             sys.stdout.write(f"[STEP] step={step} reward={final_reward:.3f}\n")
             sys.stdout.flush()
 
             history.append(f"Step {step}: {action.action_type}")
 
-        # [END] marker
         sys.stdout.write(f"[END] task={task} score={final_reward:.3f} steps={step}\n")
         sys.stdout.flush()
 
