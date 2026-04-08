@@ -1,17 +1,3 @@
-"""
-Inference Script for Code Review Environment
-===================================
-MANDATORY
-- Before submitting, ensure the following variables are defined in your environment configuration:
-    API_BASE_URL   The API endpoint for the LLM.
-    MODEL_NAME     The model identifier to use for inference.
-    HF_TOKEN       Your Hugging Face / API key.
-    
-- The inference script must be named `inference.py` and placed in the root directory of the project
-- Participants must use OpenAI Client for all LLM calls using above variables
-- Participants must emit structured stdout logs strictly following the [START], [STEP], and [END] format.
-"""
-
 import os
 import json
 import textwrap
@@ -38,7 +24,6 @@ SYSTEM_PROMPT = textwrap.dedent(
     - propose a fixed code snippet (prefixed with "propose_fix:")
     - skip if you cannot help (just "skip")
     - end the episode if the code is perfect (just "done")
-
     Be constructive, specific, and focus on improving code quality.
     Do not add any other text.
     """
@@ -54,16 +39,12 @@ def build_user_prompt(step: int, obs: Observation, history: List[str]) -> str:
         Step: {step}
         PR Title: {obs.pr_title}
         Description: {obs.pr_description}
-
         Code to review:
         {obs.code_snippet}
-
         Conversation so far:
         {comments_str}
-
         Previous actions:
         {history_str}
-
         Your response (choose one of the following formats):
         - write_comment: [your comment]
         - ask_question: [your question]
@@ -106,18 +87,16 @@ def parse_model_action(response_text: str) -> Action:
 
 
 def main() -> None:
-    # Check mandatory environment variables
     if not API_BASE_URL or not API_KEY or not MODEL_NAME:
-        print("Error: API_BASE_URL, HF_TOKEN/API_KEY, and MODEL_NAME must be set.")
+        # This error message is printed to stderr? It must not appear on stdout.
+        # Use sys.stderr to avoid polluting structured output.
+        import sys
+        print("Error: API_BASE_URL, HF_TOKEN/API_KEY, and MODEL_NAME must be set.", file=sys.stderr)
         return
 
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
     env = CodeReviewEnv()
     tasks = ["easy", "medium", "hard", "harder", "hardest"]
-    scores = {}
-
-    # Emit START log
-    print("[START] code_review_env")
 
     for task in tasks:
         env.set_task(task)
@@ -126,6 +105,9 @@ def main() -> None:
         done = False
         step = 0
         final_reward = 0.0
+
+        # START marker
+        print(f"[START] task={task}", flush=True)
 
         while not done and step < MAX_STEPS:
             step += 1
@@ -143,24 +125,22 @@ def main() -> None:
                 )
                 response_text = completion.choices[0].message.content or ""
             except Exception as exc:
-                print(f"  Request failed: {exc}. Using fallback.")
+                # Print error to stderr only
+                import sys
+                print(f"Request failed: {exc}. Using fallback.", file=sys.stderr)
                 response_text = FALLBACK_ACTION
 
             action = parse_model_action(response_text)
             obs, reward, done, info = env.step(action)
             final_reward = reward.value
 
-            # Emit STEP log with required fields: step, action_type, reward, done
-            # Using a simple space-separated format: [STEP] <step> <action_type> <reward> <done>
-            print(f"[STEP] {step} {action.action_type} {final_reward:.3f} {int(done)}")
+            # STEP marker with required key=value format
+            print(f"[STEP] step={step} reward={final_reward:.3f}", flush=True)
 
-            # Optionally store history for prompt (not part of log)
             history.append(f"Step {step}: {action.action_type}")
 
-        scores[task] = final_reward
-
-    # Emit END log with JSON scores
-    print("[END] " + json.dumps(scores, separators=(',', ':')))
+        # END marker
+        print(f"[END] task={task} score={final_reward:.3f} steps={step}", flush=True)
 
 
 if __name__ == "__main__":
